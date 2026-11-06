@@ -1,24 +1,35 @@
 <!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Vernadsky — three orbits</title>
+<title>Неометрия — облёт</title>
 <meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;700&display=swap">
 <style>
-  /* Single screen: the orbit canvas fills the viewport, with only utility overlays on top (UI comes later).
-     The dark look is deliberate and shared by both themes: the renders read best on dark. */
+  /* Single screen: the orbit canvas fills the viewport. Neometria UI on top: the Н-frame (light border with a tab
+     at the top carrying the logo) and the height switcher, a plate coming out of the frame's right edge.
+     Colours from the Neometria design system (snapped from the DUGA case): sun #EF8400, graphite #221F1A,
+     glint #FFFEFA. The dark ground is deliberate and shared by both themes: the renders read best on dark. */
   :root {
-    --bg: #0b0c0e;
-    --fg: #e9e6df;
-    --dim: rgba(233, 230, 223, .62);
-    --line: rgba(233, 230, 223, .45);
-    --accent: #e9e6df;
-    --hud: rgba(11, 12, 14, .72);
-    --ui: ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --bg: #141414;
+    --fg: #fcfcf8;
+    --dim: #8f8b84;
+    --line: #54514d;
+    --hud: rgba(20, 20, 20, .78);
+    --sun: #ef8400;          /* brand-sun: the one accent */
+    --graphite: #221f1a;     /* brand-graphite: text on light plates, text on sun */
+    --glint: #fffefa;        /* brand-glint: frame and plates */
+    --plate-hover: #ebe7de;
+    --muted: #6e6a62;        /* ink-muted on glint, 5.3:1 */
+    --frame: 8px;
+    --ui: "Onest", "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
     color-scheme: dark;
   }
+  @media (max-width: 600px) { :root { --frame: 5px; } }
   html, body { height: 100%; }
   body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--ui); overflow: hidden;
          -webkit-user-select: none; user-select: none; }
@@ -27,30 +38,55 @@
                 cursor: grab; }
   canvas#view.drag { cursor: grabbing; }
 
-  /* Orbit height: tick marks on the right, top to bottom in orbits.json order (swipe up = higher). */
-  .levels { position: absolute; right: calc(14px + env(safe-area-inset-right, 0px)); top: 50%;
-            transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; }
-  .levels button { appearance: none; border: 0; background: none; padding: 6px 0 6px 14px; cursor: pointer;
-                   display: flex; align-items: center; gap: 8px; color: var(--dim); font: 500 11px/1 var(--mono);
-                   letter-spacing: .06em; }
-  .levels button i { display: block; width: 18px; height: 2px; background: var(--line); border-radius: 1px;
-                     transition: width .18s, background .18s; }
-  .levels { filter: drop-shadow(0 0 6px rgba(0,0,0,.55)); }
-  .levels button { text-shadow: 0 1px 3px rgba(0,0,0,.7); }
-  .levels button.on { color: var(--fg); }
-  .levels button.on i { width: 28px; background: var(--accent); }
-  .levels button:focus-visible { outline: 1px solid var(--fg); outline-offset: 2px; }
+  /* Н-frame: a light border round the screen, inside the safe area on phones. */
+  .frame { position: absolute; pointer-events: none;
+           inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+           box-shadow: inset 0 0 0 var(--frame) var(--glint); }
+  /* The paint above the frame on notched phones, so the tab reads as part of it. */
+  body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10;
+                 background: var(--glint); }
 
-  .hint { position: absolute; left: 50%; bottom: calc(40px + env(safe-area-inset-bottom, 0px));
-          transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); text-align: center;
-          font: 13px/1.4 var(--ui); color: var(--fg); text-shadow: 0 1px 4px rgba(0,0,0,.8); transition: opacity .6s; pointer-events: none; }
-  .hint.gone { opacity: 0; }
+  /* Top plate: the tab cut into the frame, logo on it. */
+  .brand { position: absolute; top: env(safe-area-inset-top, 0px); left: 50%; transform: translateX(-50%);
+           background: var(--glint); color: var(--graphite); border-radius: 0 0 8px 8px;
+           padding: 14px 22px 12px; display: flex; flex-direction: column; align-items: center; gap: 3px;
+           pointer-events: none; white-space: nowrap; }
+  .brand .row { display: flex; align-items: center; gap: 10px; font-size: 19px; line-height: 22px; letter-spacing: -.02em; }
+  .brand b { font-weight: 700; }
+  .brand .n { display: flex; align-items: center; }
+  .brand .n i { display: block; width: 9px; height: 9px; background: currentColor; }
+  .brand .n s { display: block; width: 12px; height: 3px; background: currentColor; }
+  .brand small { font-size: 11px; line-height: 14px; color: var(--muted); }
+  @media (max-width: 600px) {
+    .brand { padding: 10px 16px 9px; }
+    .brand .row { font-size: 16px; line-height: 19px; gap: 8px; }
+    .brand small { font-size: 10px; }
+  }
 
-  .note { position: absolute; left: calc(12px + env(safe-area-inset-left, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-          max-width: calc(100% - 32px); font: 11px/1.4 var(--mono); color: var(--dim); text-shadow: 0 1px 3px rgba(0,0,0,.8);
-          pointer-events: none; }
-  .load { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: transparent; }
-  .load i { display: block; height: 100%; width: 0; background: var(--fg); opacity: .5; transition: width .2s; }
+  /* Orbit height: a plate coming out of the frame's right edge, top to bottom in orbits.json order
+     (swipe up = higher). The active height is the screen's single orange accent. */
+  .levels { position: absolute; right: calc(var(--frame) + env(safe-area-inset-right, 0px)); top: 50%;
+            transform: translateY(-50%); background: var(--glint); color: var(--graphite);
+            border-radius: 8px 0 0 8px; padding: 12px 8px 8px; display: flex; flex-direction: column;
+            align-items: center; gap: 4px; }
+  .levels .cap { font-size: 11px; font-weight: 500; line-height: 14px; letter-spacing: .06em; color: var(--muted);
+                 padding-bottom: 6px; }
+  .levels button { appearance: none; border: 0; width: 56px; height: 44px; border-radius: 8px; background: transparent;
+                   color: var(--graphite); font: 500 16px/1 var(--ui); font-variant-numeric: tabular-nums;
+                   cursor: pointer; transition: background-color .18s; }
+  .levels button:hover { background: var(--plate-hover); }
+  .levels button.on { background: var(--sun); cursor: default; }
+  .levels button:focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; }
+  @media (max-width: 600px) {
+    .levels { padding: 10px 6px 6px; }
+    .levels .cap { font-size: 10px; }
+    .levels button { width: 48px; }
+  }
+
+  .load { position: absolute; left: calc(var(--frame) + env(safe-area-inset-left, 0px));
+          right: calc(var(--frame) + env(safe-area-inset-right, 0px));
+          bottom: calc(var(--frame) + env(safe-area-inset-bottom, 0px)); height: 2px; background: transparent; pointer-events: none; }
+  .load i { display: block; height: 100%; width: 0; background: var(--sun); transition: width .2s; }
   .load.done { opacity: 0; transition: opacity .8s .4s; }
 
   .msg { position: absolute; inset: 0; display: grid; place-items: center; padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
@@ -66,16 +102,19 @@
   .dbg canvas { width: 120px; height: 90px; background: #000; border: 1px solid var(--line); }
   .dbg .strip div.on canvas { border-color: var(--fg); }
   .dbg pre { margin: 6px 0 0; white-space: pre-wrap; color: var(--dim); }
-  @media (prefers-reduced-motion: reduce) { .levels button i, .hint, .load i { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .levels button, .load i { transition: none; } }
 </style>
 </head>
 <body>
 
 <div id="stage">
-  <canvas id="view" aria-label="Building fly-around: drag horizontally to rotate, up and down to change height"></canvas>
-  <nav class="levels" id="levels" aria-label="Orbit height"></nav>
-  <div class="hint" id="hint">Drag left-right to orbit · up-down to change height</div>
-  <div class="note" id="note" hidden></div>
+  <canvas id="view" aria-label="Облёт дома: тяните влево-вправо, чтобы повернуть, вверх-вниз — чтобы сменить высоту"></canvas>
+  <div class="frame" aria-hidden="true"></div>
+  <div class="brand">
+    <div class="row"><b>неометрия</b><span class="n" aria-hidden="true"><i></i><s></s><i></i></span><span>облёт</span></div>
+    <small>заботливый девелопер</small>
+  </div>
+  <nav class="levels" id="levels" aria-label="Высота облёта"><span class="cap" aria-hidden="true">ВЫСОТА</span></nav>
   <div class="load" id="load"><i></i></div>
   <div class="dbg" id="dbg" hidden></div>
 </div>
@@ -101,7 +140,6 @@
   try { M = await (await fetch(base + 'orbits.json', { cache: 'no-cache' })).json(); }
   catch (e) { msg('Could not load ' + base + 'orbits.json. Prepare the frames first (tools/prepare_orbits.py).'); return; }
 
-  if (M.note) { $('note').textContent = M.note; $('note').hidden = false; }
   const CFG = Object.assign({
     degPerPx: 0.3,      // orbit degrees per CSS pixel of drag
     dragSign: 1,        // 1: drag right = ascending frames; -1 = the opposite
@@ -215,23 +253,22 @@
 
   // --- Controls ------------------------------------------------------------------------------------------------------
   const levelsEl = $('levels');
-  orbits.forEach((o, i) => {
+  // Buttons top to bottom = highest to lowest orbit; labelled by height (N … 1), or by orbits.json "label".
+  const levelBtns = orbits.map((o, i) => {
     const b = document.createElement('button');
     b.type = 'button'; b.id = 'lvl-' + o.id;
-    b.innerHTML = '<i></i>';
-    b.setAttribute('aria-label', 'Orbit ' + (o.label || o.id));
+    b.textContent = o.label || String(N - i);
+    b.setAttribute('aria-label', 'Высота ' + (o.label || (N - i) + ' из ' + N));
     b.onclick = () => setLevel(i);
     levelsEl.append(b);
+    return b;
   });
   function setLevel(i) {
     i = Math.max(0, Math.min(N - 1, i));
     if (i !== level) { level = i; dirty = true; pump(); }
-    [...levelsEl.children].forEach((b, j) => { b.classList.toggle('on', j === level); b.setAttribute('aria-pressed', j === level); });
+    levelBtns.forEach((b, j) => { b.classList.toggle('on', j === level); b.setAttribute('aria-pressed', j === level); });
   }
   setLevel(level);
-
-  let hinted = false;
-  const unhint = () => { if (!hinted) { hinted = true; $('hint').classList.add('gone'); } };
 
   // Drag: X rotates the orbit, Y from the touch point steps the height (hard switch, with hysteresis).
   // Both axes work at once, so a diagonal drag does both.
@@ -239,7 +276,7 @@
   canvas.addEventListener('pointerdown', e => {
     canvas.setPointerCapture(e.pointerId);
     drag = { id: e.pointerId, x: e.clientX, y0: e.clientY, startLevel: level, step: 0 };
-    canvas.classList.add('drag'); unhint();
+    canvas.classList.add('drag');
   });
   canvas.addEventListener('pointermove', e => {
     if (!drag || e.pointerId !== drag.id) return;
@@ -260,7 +297,7 @@
   // Wheel/trackpad: horizontal rotates, vertical steps the height.
   let wheelY = 0, wheelT = 0;
   canvas.addEventListener('wheel', e => {
-    e.preventDefault(); unhint();
+    e.preventDefault();
     target += CFG.dragSign * -e.deltaX * CFG.degPerPx / 360;
     const now = performance.now();
     if (now - wheelT > 250) wheelY = 0;
@@ -272,7 +309,6 @@
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       const o = orbits[level];
       target = (Math.round(target * o.count) + (e.key === 'ArrowRight' ? 1 : -1) * CFG.dragSign) / o.count;
-      unhint();
     } else if (e.key === 'ArrowUp') setLevel(level - 1);
     else if (e.key === 'ArrowDown') setLevel(level + 1);
     // e.code is the physical key, so these work in any keyboard layout.
