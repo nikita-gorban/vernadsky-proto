@@ -1,10 +1,20 @@
 {
- "version": 1,
+ "version": 2,
  "reference": "2",
  "start": {
   "orbit": "1",
   "frame": 0,
   "turn": 0.0
+ },
+ "tiers": {
+  "spin": {
+   "dir": "spin/",
+   "ext": "avif"
+  },
+  "sharp": {
+   "dir": "sharp/",
+   "ext": "avif"
+  }
  },
  "orbits": [
   {
@@ -12,13 +22,20 @@
    "dir": "orbit3/",
    "count": 360,
    "pad": 4,
-   "ext": "webp",
    "offset": 0,
    "reverse": false,
-   "width": 1280,
-   "height": 1280,
    "shiftY": 0,
    "zoom": 1,
+   "sizes": {
+    "spin": [
+     800,
+     800
+    ],
+    "sharp": [
+     1920,
+     1920
+    ]
+   },
    "source": [
     "CC_Panorama360_003_0001.jpg",
     "CC_Panorama360_003_0360.jpg"
@@ -29,13 +46,20 @@
    "dir": "orbit1/",
    "count": 360,
    "pad": 4,
-   "ext": "webp",
    "offset": 0,
    "reverse": false,
-   "width": 1280,
-   "height": 1280,
    "shiftY": 0,
    "zoom": 1,
+   "sizes": {
+    "spin": [
+     800,
+     800
+    ],
+    "sharp": [
+     1920,
+     1920
+    ]
+   },
    "source": [
     "CC_Pano360_001_0001.jpg",
     "CC_Pano360_001_0360.jpg"
@@ -46,13 +70,20 @@
    "dir": "orbit2/",
    "count": 360,
    "pad": 4,
-   "ext": "webp",
    "offset": 0,
    "reverse": false,
-   "width": 1280,
-   "height": 1280,
    "shiftY": 0,
    "zoom": 1,
+   "sizes": {
+    "spin": [
+     800,
+     800
+    ],
+    "sharp": [
+     1280,
+     1280
+    ]
+   },
    "source": [
     "CC_Panorama360_0020001.jpg",
     "CC_Panorama360_0020360.jpg"

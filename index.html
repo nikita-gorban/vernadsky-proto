@@ -143,83 +143,109 @@
     switchPx: 70,       // vertical CSS pixels per height step
     hysteresis: 0.2,    // fraction of switchPx, prevents flicker at the threshold
     followMs: 60,       // image catches up with the finger in ~this time (smooths event jitter)
-    parallel: 6,        // concurrent downloads
+    parallel: 8,        // concurrent spin downloads (HTTP/2, so this is cheap)
+    sharpDelayMs: 150,  // the view must rest on a frame this long before its sharp version is fetched
+    sharpCache: 40,     // sharp frames kept in memory (each is ~15 MB decoded at 1920 px)
+    fadeMs: 180,        // cross-fade from the spin frame to the sharp one
   }, M.controls || {});
-  const orbits = M.orbits.map(o => Object.assign({ pad: 4, ext: 'webp', offset: 0, reverse: false, zoom: 1, shiftY: 0 }, o));
-  orbits.forEach(o => { o.imgs = new Array(o.count).fill(null); o.ok = new Uint8Array(o.count); o.dir = base + o.dir; });
+  // Two tiers per frame (see tools/prepare_orbits.py): spin/ is light and used while moving; sharp/ is full
+  // resolution and fetched only for the frame the view rests on (plus the same angle on the neighbouring orbits).
+  const TIERS = Object.assign({ spin: { dir: 'spin/', ext: 'avif' }, sharp: { dir: 'sharp/', ext: 'avif' } }, M.tiers || {});
+  const orbits = M.orbits.map(o => Object.assign({ pad: 4, offset: 0, reverse: false, zoom: 1, shiftY: 0 }, o));
+  orbits.forEach(o => {
+    o.dir = base + o.dir;
+    o.spin = new Array(o.count).fill(null);   // Image per frame, once requested
+    o.ok = new Uint8Array(o.count);           // spin state: 0 pending, 1 decoded, 2 failed
+    o.sharp = new Map();                      // frame -> { img, ok, used }
+  });
   const N = orbits.length;
   const mod = (a, n) => ((a % n) + n) % n;
   const frameOf = (o, t) => mod(o.offset + (o.reverse ? -1 : 1) * Math.round(mod(t, 1) * o.count), o.count);
-  const url = (o, k) => o.pack ? o.blobs[k] : o.dir + String(k).padStart(o.pad, '0') + '.' + o.ext;
+  const url = (o, tier, k) => o.dir + TIERS[tier].dir + String(k).padStart(o.pad, '0') + '.' + TIERS[tier].ext;
 
   let level = Math.max(0, orbits.findIndex(o => String(o.id) === String(qs.get('orbit') ?? M.start?.orbit)));
   let turn = qs.has('deg') ? +qs.get('deg') / 360 : (M.start?.turn || 0);
   let target = turn;
 
-  // --- Loading: current orbit around the current angle first, plus neighbouring orbits at that angle -------------
-  // (so height switches are instant), then everything else by distance from the angle.
-  let inflight = 0, loaded = 0;
+  // --- Loading: spin tier ---------------------------------------------------------------------------------------------
+  // Coarse to fine, so the whole circle can be turned within seconds and then fills in:
+  //   1. a few frames around the current angle, on the current orbit and then on the others (instant height switch);
+  //   2. the current orbit every 24°, 8°, 4°, 2°, 1°, each pass nearest-first;
+  //   3. the other orbits the same way, two passes behind per step of height.
+  // A frame that is not there yet is drawn from the nearest loaded one (pickFrame).
+  const STEPS = [24, 8, 4, 2, 1];
+  const passOf = k => { let p = 0; while (k % STEPS[p]) p++; return p; };
+  let inflight = 0, loaded = 0, good = 0;
   const total = orbits.reduce((s, o) => s + o.count, 0);
   function nextToLoad() {
     let best = null, bestScore = Infinity;
     for (let li = 0; li < N; li++) {
       const o = orbits[li], c = frameOf(o, turn), lw = Math.abs(li - level);
       for (let k = 0; k < o.count; k++) {
-        if (o.imgs[k] || (o.pack && !o.blobs[k])) continue;   // packed frame has not arrived yet
-        const d = Math.min(mod(k - c, o.count), mod(c - k, o.count)) / o.count;  // fraction of a revolution to the frame
-        const score = d * 360 + lw * (d * 360 < 6 ? 2 : 25);   // neighbouring orbits near the angle rank almost equally
+        if (o.spin[k]) continue;
+        const deg = Math.min(mod(k - c, o.count), mod(c - k, o.count)) / o.count * 360;
+        const score = deg <= 3 ? lw + deg / 10 : 10 + passOf(k) * 10 + lw * 20 + deg / 36;
         if (score < bestScore) { bestScore = score; best = [o, k]; }
       }
     }
     return best;
   }
+  // Decode before marking a frame ready, so drawing it never stalls on a decode.
+  const decoded = img => (img.decode ? img.decode() : Promise.resolve()).catch(() => {});
   function pump() {
-    while (inflight < CFG.parallel) {
+    // While a sharp frame is on its way, leave it most of the bandwidth.
+    const limit = sharpInflight ? 2 : CFG.parallel;
+    while (inflight < limit) {
       const n = nextToLoad();
       if (!n) return;
       const [o, k] = n, img = new Image();
-      o.imgs[k] = img; inflight++;
+      o.spin[k] = img; inflight++;
       img.decoding = 'async';
-      img.onload = () => {
-        img.decode?.().catch(() => {});
-        o.ok[k] = 1; inflight--; loaded++; progress(); dirty = true; pump();
+      img.onload = () => decoded(img).then(() => {
+        o.ok[k] = 1; inflight--; loaded++; good++; progress(); dirty = true; pump();
+      });
+      img.onerror = () => {
+        o.ok[k] = 2; inflight--; loaded++; progress(); pump();
+        if (loaded >= 4 && !good && !failedMsg) { failedMsg = true; msg('Could not load the frames. This browser may not support AVIF images; please update it.'); }
       };
-      img.onerror = () => { o.ok[k] = 2; inflight--; loaded++; progress(); pump(); };
-      img.src = url(o, k);
+      img.src = url(o, 'spin', k);
     }
   }
-  // Packing (optional): an orbit's frames live in several files o.pack = [name, …],
-  // o.index[k] = [file number, offset, length]. Frames are interleaved (k % file count), so after the first file
-  // of each orbit the full circle is already there at a coarse step, and it fills in from there.
-  // Fewer requests, handy for hosting with a limit on file count.
-  orbits.forEach(o => { if (o.pack) { if (!Array.isArray(o.pack)) { o.pack = [o.pack]; o.index = o.index.map(e => [0, ...e]); }
-                                      o.blobs = new Array(o.count).fill(null); } });
-  async function loadPacks() {
-    const P = Math.max(0, ...orbits.map(o => o.pack ? o.pack.length : 0));
-    for (let p = 0; p < P; p++) {
-      const order = orbits.map((o, i) => i).sort((a, b) => Math.abs(a - level) - Math.abs(b - level));
-      await Promise.all(order.map(async i => {
-        const o = orbits[i];
-        if (!o.pack || p >= o.pack.length) return;
-        const buf = await (await fetch(o.dir + o.pack[p])).arrayBuffer();
-        const type = 'image/' + o.ext;
-        o.index.forEach(([f, off, len], k) => {
-          if (f === p) o.blobs[k] = URL.createObjectURL(new Blob([buf.slice(off, off + len)], { type }));
-        });
-        pump();
-      }));
-    }
-  }
+  let failedMsg = false;
   function progress() {
     $('load').firstElementChild.style.width = (100 * loaded / total) + '%';
     if (loaded === total) $('load').classList.add('done');
   }
 
+  // --- Loading: sharp tier --------------------------------------------------------------------------------------------
+  let sharpInflight = 0, sharpCount = 0;
+  function pumpSharp(now) {
+    const want = [level, level - 1, level + 1].filter(li => li >= 0 && li < N).map(li => [orbits[li], frameOf(orbits[li], turn)]);
+    for (const [o, k] of want) {
+      if (sharpInflight >= 2) break;
+      if (o.sharp.has(k)) continue;
+      const img = new Image(), e = { img, ok: 0, used: now };
+      o.sharp.set(k, e); sharpInflight++; sharpCount++;
+      img.decoding = 'async';
+      img.onload = () => decoded(img).then(() => { e.ok = 1; sharpInflight--; dirty = true; pump(); });
+      img.onerror = () => { e.ok = 2; sharpInflight--; pump(); };
+      img.src = url(o, 'sharp', k);
+    }
+    // Keep memory bounded: drop the least recently shown sharp frames.
+    while (sharpCount > CFG.sharpCache) {
+      let old = null;
+      orbits.forEach(o => o.sharp.forEach((e, k) => { if (e.ok && (!old || e.used < old[2].used)) old = [o, k, e]; }));
+      if (!old) break;
+      old[0].sharp.delete(old[1]); old[2].img.src = ''; sharpCount--;
+    }
+  }
+
   // --- Drawing -------------------------------------------------------------------------------------------------------
-  let dirty = true, lastDrawn = null;
+  let dirty = true, lastDrawn = null, fade = null;
   function resize() {
     const r = canvas.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
     canvas.width = Math.round(r.width * dpr); canvas.height = Math.round(r.height * dpr);
+    ctx.imageSmoothingQuality = 'high';   // the spin tier is upscaled on large screens; resizing resets this
     dirty = true;
   }
   addEventListener('resize', resize); resize();
@@ -232,18 +258,31 @@
     }
     return -1;
   }
-  function drawFrame(c, cx, o, k) {
-    const img = o.imgs[k], W = c.width, H = c.height;
+  function drawFrame(c, cx, o, img, clear = true) {
+    const W = c.width, H = c.height;
     const s = Math.max(W / img.naturalWidth, H / img.naturalHeight) * (o.zoom || 1);
     const w = img.naturalWidth * s, h = img.naturalHeight * s;
-    cx.fillStyle = '#000'; cx.fillRect(0, 0, W, H);
+    if (clear) { cx.fillStyle = '#000'; cx.fillRect(0, 0, W, H); }
     cx.drawImage(img, (W - w) / 2, (H - h) / 2 + (o.shiftY || 0) * h, w, h);
   }
-  function draw() {
-    const o = orbits[level], want = frameOf(o, turn), k = pickFrame(o, want);
-    const key = level + ':' + k + ':' + canvas.width + 'x' + canvas.height;
-    if (k < 0 || (!dirty && key === lastDrawn)) return;
-    drawFrame(canvas, ctx, o, k);
+  function draw(now) {
+    const o = orbits[level], want = frameOf(o, turn), k = pickFrame(o, want), sh = o.sharp.get(want);
+    const sharp = !!(sh && sh.ok === 1), size = ':' + canvas.width + 'x' + canvas.height;
+    if (!sharp && k < 0) return;
+    const key = level + ':' + (sharp ? 's' : '') + (sharp ? want : k) + size;
+    if (sharp) {
+      sh.used = now;
+      // The sharp frame replaces the spin frame of the very same view: fade it in instead of popping.
+      if (key !== lastDrawn && lastDrawn === level + ':' + want + size) fade = { key, t0: now };
+    }
+    if (fade && fade.key !== key) fade = null;
+    if (!dirty && !fade && key === lastDrawn) return;
+    const a = fade ? Math.min(1, (now - fade.t0) / CFG.fadeMs) : 1;
+    if (sharp && a < 1 && k === want) {
+      drawFrame(canvas, ctx, o, o.spin[k]);
+      ctx.globalAlpha = a; drawFrame(canvas, ctx, o, sh.img, false); ctx.globalAlpha = 1;
+    } else drawFrame(canvas, ctx, o, sharp ? sh.img : o.spin[k]);
+    if (a >= 1) fade = null;
     lastDrawn = key; dirty = false;
     if (!dbg.hidden) drawDebug();
   }
@@ -330,14 +369,16 @@
     orbits.forEach((o, i) => {
       const cell = $('dbgCell' + i), c = cell.querySelector('canvas'), k = frameOf(o, turn), got = pickFrame(o, k);
       cell.classList.toggle('on', i === level);
-      if (got >= 0) drawFrame(c, c.getContext('2d'), o, got);
+      if (got >= 0) drawFrame(c, c.getContext('2d'), o, o.spin[got]);
+      const sh = o.sharp.get(k);
       cell.querySelector('span').textContent = (o.label || o.id) + ': frame ' + k + (got !== k ? ' (loading)' : '') +
+        (sh ? (sh.ok === 1 ? ' · sharp' : sh.ok ? ' · sharp failed' : ' · sharp…') : '') +
         ' · offset ' + o.offset + (o.reverse ? ' · rev.' : '');
     });
   }
 
   // --- Loop ----------------------------------------------------------------------------------------------------------
-  let last = performance.now(), lastBucket = null;
+  let last = performance.now(), lastBucket = null, restSince = last;
   (function tick(now) {
     const dt = Math.min(100, now - last); last = now;
     if (turn !== target) {
@@ -346,12 +387,12 @@
       dirty = true;
     }
     const bucket = level + ':' + frameOf(orbits[level], turn);
-    if (bucket !== lastBucket) { lastBucket = bucket; pump(); }
-    draw();
+    if (bucket !== lastBucket) { lastBucket = bucket; restSince = now; pump(); }
+    else if (now - restSince > CFG.sharpDelayMs) pumpSharp(now);
+    draw(now);
     requestAnimationFrame(tick);
   })(last);
   pump();
-  loadPacks();
   window.orbit3 = { orbits, get turn() { return turn; }, get level() { return level; }, setLevel,
                     setDeg: d => { target = turn = d / 360; dirty = true; pump(); } };
 })();
