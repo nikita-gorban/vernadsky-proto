@@ -91,7 +91,21 @@
   .tod input::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--sun);
                                  border: 2px solid var(--glint); box-sizing: border-box; }
   .tod input:focus-visible { outline: 2px solid var(--sun); outline-offset: 2px; border-radius: 4px; }
-  .levels[hidden], .tod[hidden] { display: none; }
+  .tod .x { position: absolute; top: 4px; right: 4px; width: 28px; height: 28px; border: 0; border-radius: 5px;
+            background: transparent; color: var(--graphite); cursor: pointer; display: grid; place-items: center; }
+  .tod .x:hover { background: rgba(255, 254, 250, .7); }
+  .tod .x:focus-visible { outline: 2px solid var(--sun); outline-offset: 1px; }
+  .tod .x svg { width: 14px; height: 14px; }
+  /* Sun mode locks the camera: the height plate dims, drags on the image move the time instead. */
+  #levels { transition: opacity .2s; }
+  .side.locked #levels { opacity: .5; pointer-events: none; }
+  canvas#view.sunlock { cursor: ew-resize; }
+  .tip { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(var(--tod-h, 64px) + 10px + env(safe-area-inset-bottom, 0px));
+         max-width: calc(100% - 32px); box-sizing: border-box; padding: 7px 12px; border-radius: 6px;
+         background: rgba(34, 31, 26, .78); color: var(--glint); font: 500 12px/1.35 var(--ui); text-align: center;
+         pointer-events: none; transition: opacity .4s; }
+  .tip.gone { opacity: 0; }
+  .levels[hidden], .tod[hidden], .tip[hidden] { display: none; }
 
   .load { position: absolute; left: env(safe-area-inset-left, 0px); right: env(safe-area-inset-right, 0px);
           bottom: env(safe-area-inset-bottom, 0px); height: 2px; background: transparent; pointer-events: none; }
@@ -127,8 +141,10 @@
   </div>
   <div class="tod" id="tod" hidden>
     <span class="cap" aria-hidden="true">ВРЕМЯ СУТОК</span>
+    <button type="button" class="x" id="todClose" aria-label="Вернуться к облёту" title="Вернуться к облёту"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     <div class="row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg><input type="range" id="todRange" min="0" max="0" step="1" aria-label="Время суток: от утра до ночи"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg></div>
   </div>
+  <div class="tip gone" id="tip" hidden>Камера зафиксирована — тяните по экрану, чтобы менять время</div>
   <div class="load" id="load"><i></i></div>
   <div class="dbg" id="dbg" hidden></div>
 </div>
@@ -365,12 +381,28 @@
     // The turn at which this orbit shows the sun camera's frame, taken the short way round.
     const t = (o.reverse ? -1 : 1) * (sun.frame - o.offset) / o.count;
     target = turn + (mod(t - turn + 0.5, 1) - 0.5);
-    sunMode = 'enter'; sunBtn.classList.add('on'); sunBtn.setAttribute('aria-pressed', 'true'); pump();
+    sunMode = 'enter'; sunBtn.classList.add('on'); sunBtn.setAttribute('aria-pressed', 'true'); lock(true); pump();
   }
   function exitSun() {
-    sunMode = 'off'; tod.hidden = true; dirty = true;
+    sunMode = 'off'; tod.hidden = true; dirty = true; lock(false); hideTip();
     sunBtn.classList.remove('on'); sunBtn.setAttribute('aria-pressed', 'false');
   }
+  // While the sun mode is on, the camera is locked: the height buttons are disabled and a drag on the image moves
+  // the time (the slider follows), so nothing jumps when the user drags out of habit.
+  function lock(on) {
+    $('levels').parentElement.classList.toggle('locked', on);
+    canvas.classList.toggle('sunlock', on);
+    levelBtns.forEach(b => (on ? b.setAttribute('aria-disabled', 'true') : b.removeAttribute('aria-disabled')));
+  }
+  // One-time explanation of the lock, the first time the mode opens in a session.
+  const tip = $('tip'); let tipShown = false, tipTimer = 0;
+  function showTip() {
+    if (tipShown) return;
+    tipShown = true; tip.style.setProperty('--tod-h', tod.offsetHeight + 'px');
+    tip.hidden = false; requestAnimationFrame(() => tip.classList.remove('gone'));
+    tipTimer = setTimeout(hideTip, 4000);
+  }
+  function hideTip() { clearTimeout(tipTimer); tip.classList.add('gone'); }
   function setSunTime(v) {
     v = Math.max(0, Math.min(sun.count - 1, Math.round(v)));
     if (v !== sunTime) { sunTime = v; dirty = true; pump(); }
@@ -380,7 +412,8 @@
     $('sunPlate').hidden = false;
     todRange.max = sun.count - 1; todRange.value = sunTime;
     sunBtn.onclick = () => (sunMode === 'off' ? enterSun() : exitSun());
-    todRange.addEventListener('input', () => setSunTime(+todRange.value));
+    todRange.addEventListener('input', () => { hideTip(); setSunTime(+todRange.value); });
+    $('todClose').onclick = exitSun;
   }
 
   // Drag: X rotates the orbit, Y from the touch point steps the height (hard switch, with hysteresis).
@@ -388,14 +421,15 @@
   let drag = null;
   canvas.addEventListener('pointerdown', e => {
     canvas.setPointerCapture(e.pointerId);
-    drag = { id: e.pointerId, x: e.clientX, x0: e.clientX, y0: e.clientY, startLevel: level, step: 0 };
+    drag = { id: e.pointerId, x: e.clientX, x0: e.clientX, y0: e.clientY, startLevel: level, step: 0, t0: sunTime };
     canvas.classList.add('drag');
   });
   canvas.addEventListener('pointermove', e => {
     if (!drag || e.pointerId !== drag.id) return;
-    if (sunMode !== 'off') {   // a real drag leaves the sun mode; a tap or a jitter does not
-      if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 8) { drag.x = e.clientX; return; }
-      exitSun();
+    if (sunMode !== 'off') {   // camera locked: a horizontal drag moves the time, the whole range across ~90% of the width
+      hideTip();
+      setSunTime(drag.t0 + (e.clientX - drag.x0) * sun.count / (canvas.clientWidth * 0.9));
+      return;
     }
     target += CFG.dragSign * (e.clientX - drag.x) * CFG.degPerPx / 360;
     drag.x = e.clientX;
@@ -412,11 +446,16 @@
   canvas.addEventListener('pointercancel', up);
 
   // Wheel/trackpad: horizontal rotates, vertical steps the height.
-  let wheelY = 0, wheelT = 0;
+  let wheelY = 0, wheelT = 0, wheelS = 0;
   canvas.addEventListener('wheel', e => {
     e.preventDefault();
-    if (sunMode !== 'off' && Math.abs(e.deltaX) > 1) exitSun();
-    if (sunMode === 'off') target += CFG.dragSign * -e.deltaX * CFG.degPerPx / 360;
+    if (sunMode !== 'off') {   // either axis moves the time, one frame per ~24 px of scroll
+      const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      wheelS += d; const n = Math.trunc(wheelS / 24);
+      if (n) { wheelS -= n * 24; hideTip(); setSunTime(sunTime + n); }
+      return;
+    }
+    target += CFG.dragSign * -e.deltaX * CFG.degPerPx / 360;
     const now = performance.now();
     if (now - wheelT > 250) wheelY = 0;
     wheelT = now; wheelY += e.deltaY;
@@ -424,8 +463,10 @@
   }, { passive: false });
 
   addEventListener('keydown', e => {
+    if (e.key === 'Escape' && sunMode !== 'off') { exitSun(); return; }
     if (e.target === todRange) return;   // the slider handles its own keys
-    if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && sunMode === 'on') setSunTime(sunTime + (e.key === 'ArrowRight' ? 1 : -1));
+    if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && sunMode !== 'off') return;   // camera locked
+    else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && sunMode === 'on') { hideTip(); setSunTime(sunTime + (e.key === 'ArrowRight' ? 1 : -1)); }
     else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       if (sunMode !== 'off') exitSun();
       const o = orbits[level];
@@ -475,7 +516,7 @@
       dirty = true;
     }
     if (sunMode === 'enter' && level === sun.level && frameOf(orbits[level], turn) === sun.frame && Math.abs(target - turn) < 1e-3) {
-      sunMode = 'on'; tod.hidden = false; dirty = true; pump();
+      sunMode = 'on'; tod.hidden = false; dirty = true; pump(); showTip();
     }
     const bucket = sunMode === 'on' ? 'sun:' + sunTime : level + ':' + frameOf(orbits[level], turn);
     if (bucket !== lastBucket) { lastBucket = bucket; restSince = now; pump(); }

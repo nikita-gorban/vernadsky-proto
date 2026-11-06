@@ -92,11 +92,11 @@
  ],
  "sun": {
   "dir": "sun/",
-  "count": 101,
+  "count": 79,
   "pad": 4,
   "orbit": "1",
   "frame": 0,
-  "start": 63,
+  "start": 62,
   "sizes": {
    "spin": [
     800,
@@ -109,7 +109,7 @@
   },
   "source": [
    "CC_Sun_0001.jpg",
-   "CC_Sun_0101.jpg"
+   "CC_Sun_0079.jpg"
   ]
  }
 }

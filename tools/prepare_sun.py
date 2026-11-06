@@ -6,11 +6,12 @@ The camera must match one orbit frame (the sun study was rendered from orbit 1, 
 view, then shows the sequence with a time slider. Frames get the same two tiers as the orbits (spin/ and sharp/,
 format from orbits.json → tiers) in <out>/sun/, and orbits.json gets a "sun" entry. Run prepare_orbits.py first.
 
-The start frame (the time the slider opens at) is the sequence frame whose colours are closest to the orbit frame,
-so switching into the sun mode does not visibly jump. Override with --start.
+The start frame (the time the slider opens at) is the sequence frame whose shadows match the orbit frame best,
+so switching into the sun mode does not visibly jump. Override with --start. --last drops the frames after it
+(the study runs into full night; the viewer stops at dusk).
 
 Example:
-  python3 tools/prepare_sun.py --out frames --orbit 1 --frame 0 \\
+  python3 tools/prepare_sun.py --out frames --orbit 1 --frame 0 --last 78 --start 62 \\
       --src "…/WebApp/CC_Sun::CC_Sun_[0-9]*.jpg"
 
 Requires: python3, Pillow 11.3+ (built-in AVIF), numpy.
@@ -19,15 +20,19 @@ import argparse, json, os, sys
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from prepare_orbits import list_frames, fit, save  # noqa: E402
 
 
-def thumb(path):
+def shadows(path, n=200):
+    """Shadow mask of the lower half (the ground): pixels clearly darker than their surroundings."""
     with Image.open(path) as im:
-        return np.asarray(im.convert('RGB').resize((64, 64), Image.BILINEAR), dtype=np.float32)
+        g = im.convert('L').resize((n, n), Image.BILINEAR).crop((0, n // 2, n, n))
+    a = np.asarray(g, dtype=np.float32)
+    b = np.asarray(g.filter(ImageFilter.GaussianBlur(6)), dtype=np.float32)
+    return a < b * 0.8
 
 
 def main():
@@ -36,7 +41,8 @@ def main():
     ap.add_argument('--out', required=True, help='frames folder with orbits.json (from prepare_orbits.py)')
     ap.add_argument('--orbit', required=True, help='orbit id the camera belongs to')
     ap.add_argument('--frame', type=int, required=True, help='frame of that orbit the camera matches')
-    ap.add_argument('--start', type=int, help='sequence frame the slider opens at (default: closest to the orbit frame)')
+    ap.add_argument('--start', type=int, help='sequence frame the slider opens at (default: best shadow match)')
+    ap.add_argument('--last', type=int, help='last sequence frame to keep, 0-based (default: all)')
     ap.add_argument('--spin-size', type=int, default=800)
     ap.add_argument('--spin-quality', type=int, default=50)
     ap.add_argument('--sharp-size', type=int, default=1920)
@@ -54,6 +60,8 @@ def main():
         sys.exit(f'No orbit {a.orbit} in {manifest_path}')
 
     folder, files = list_frames(a.src)
+    if a.last is not None:
+        files = files[:a.last + 1]
     dst = os.path.join(a.out, 'sun')
     settings = {'spin': (a.spin_size, a.spin_quality), 'sharp': (a.sharp_size, a.sharp_quality)}
     for name in settings:
@@ -75,10 +83,13 @@ def main():
 
     start = a.start
     if start is None:
-        ref = thumb(os.path.join(a.out, orbit['dir'], tiers['spin']['dir'], f'{a.frame:04d}.{fmt}'))
-        err = [float(((thumb(os.path.join(dst, tiers['spin']['dir'], f'{k:04d}.{fmt}')) - ref) ** 2).mean())
-               for k in range(len(files))]
-        start = int(np.argmin(err))
+        # Overlap (IoU) of the shadow masks: shadows show the sun's position, unlike overall colour or exposure.
+        ref = shadows(os.path.join(a.out, orbit['dir'], tiers['sharp']['dir'], f'{a.frame:04d}.{fmt}'))
+        iou = []
+        for k in range(len(files)):
+            m = shadows(os.path.join(dst, tiers['sharp']['dir'], f'{k:04d}.{fmt}'))
+            iou.append((ref & m).sum() / max(1, (ref | m).sum()))
+        start = int(np.argmax(iou))
         print(f'  closest to orbit {a.orbit} frame {a.frame}: sequence frame {start} ({files[start]})')
 
     manifest['sun'] = {'dir': 'sun/', 'count': len(files), 'pad': 4, 'orbit': a.orbit, 'frame': a.frame,

@@ -20,15 +20,20 @@ smears the tower windows, at q65 it is close to the source.
 ## Sun mode (time of day)
 
 The sun button under the height switcher turns the view to orbit 1, 0° — the camera of the sun study
-(`WebApp/CC_Sun`, 101 frames from morning to night, 1280 px) — and shows a time slider at the bottom. The study exists
-for this one view only, so turning the view or changing the height leaves the mode. In the mode, ← → step the time.
+(`WebApp/CC_Sun`, 1280 px) — and shows a time slider at the bottom. The study runs into full night; the viewer keeps
+frames 1–79 (morning to dusk).
 
-Frames are in `frames/sun/{spin,sharp}/` (spin 4.5 MB in all), loaded after the orbits, or first once the mode is on.
-The slider opens at the frame whose light is closest to the orbit renders (63), so entering the mode does not jump.
-Prepared with:
+The study exists for this one view only, so the camera is locked while the mode is on: the height plate dims and
+ignores clicks, and a drag on the image (or the wheel, or ← →) moves the time instead of turning the view, with the
+slider following. A one-time hint says so the first time the mode opens. The sun button, the × on the time plate,
+or Esc go back to the orbit.
+
+The slider opens at frame 62, matched to the orbit renders by the shadows (overlap of shadow masks on the ground),
+so entering the mode does not jump. Frames are in `frames/sun/{spin,sharp}/` (spin 4.3 MB in all), loaded after the
+orbits, or first once the mode is on. Prepared with:
 
 ```
-python3 tools/prepare_sun.py --out frames --orbit 1 --frame 0 \
+python3 tools/prepare_sun.py --out frames --orbit 1 --frame 0 --last 78 --start 62 \
   --src "…/WebApp/CC_Sun::CC_Sun_[0-9]*.jpg"
 ```
 
