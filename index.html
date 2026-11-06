@@ -1,13 +1,13 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Вернадский — три орбиты</title>
+<title>Vernadsky — three orbits</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
-  /* Один экран: холст облёта на всю площадь, поверх — только служебные метки (интерфейс будет позже).
-     Тёмный вид выбран сознательно и один на обе темы: рендер смотрится на тёмном. */
+  /* Single screen: the orbit canvas fills the viewport, with only utility overlays on top (UI comes later).
+     The dark look is deliberate and shared by both themes: the renders read best on dark. */
   :root {
     --bg: #0b0c0e;
     --fg: #e9e6df;
@@ -27,7 +27,7 @@
                 cursor: grab; }
   canvas#view.drag { cursor: grabbing; }
 
-  /* Высота орбиты: три риски справа. Верхняя — орбита 1 (тянем вверх), нижняя — 3. */
+  /* Orbit height: tick marks on the right, top to bottom in orbits.json order (swipe up = higher). */
   .levels { position: absolute; right: calc(14px + env(safe-area-inset-right, 0px)); top: 50%;
             transform: translateY(-50%); display: flex; flex-direction: column; gap: 6px; }
   .levels button { appearance: none; border: 0; background: none; padding: 6px 0 6px 14px; cursor: pointer;
@@ -56,7 +56,7 @@
   .msg { position: absolute; inset: 0; display: grid; place-items: center; padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px));
          text-align: center; font: 14px/1.5 var(--ui); color: var(--dim); }
 
-  /* Отладка (клавиша D или ?debug): все три орбиты на текущем угле — видно, совпадают ли кадры. */
+  /* Debug (D key or ?debug): all orbits at the current angle, to check that the frames line up. */
   .dbg { position: absolute; left: calc(12px + env(safe-area-inset-left, 0px)); top: calc(12px + env(safe-area-inset-top, 0px));
          background: var(--hud); border: 1px solid var(--line); border-radius: 6px; padding: 10px;
          font: 11px/1.5 var(--mono); color: var(--fg); font-variant-numeric: tabular-nums; max-width: calc(100% - 90px); }
@@ -72,9 +72,9 @@
 <body>
 
 <div id="stage">
-  <canvas id="view" aria-label="Облёт здания: тяните по горизонтали, чтобы вращать, вверх и вниз — чтобы сменить высоту"></canvas>
-  <nav class="levels" id="levels" aria-label="Высота облёта"></nav>
-  <div class="hint" id="hint">Тяните влево-вправо — облёт · вверх-вниз — высота</div>
+  <canvas id="view" aria-label="Building fly-around: drag horizontally to rotate, up and down to change height"></canvas>
+  <nav class="levels" id="levels" aria-label="Orbit height"></nav>
+  <div class="hint" id="hint">Drag left-right to orbit · up-down to change height</div>
   <div class="note" id="note" hidden></div>
   <div class="load" id="load"><i></i></div>
   <div class="dbg" id="dbg" hidden></div>
@@ -84,12 +84,12 @@
 (async () => {
   'use strict';
   // ------------------------------------------------------------------------------------------------------------------
-  // Модель. Положение камеры — одна величина turn (доля оборота, 0…1 по кругу) плюс номер орбиты.
-  // turn — общий «мировой» угол для всех орбит. Кадр орбиты для него:
-  //     k = offset + dir · round(turn · count)   (по модулю count)
-  // offset и dir (reverse) у каждой орбиты свои — их находит tools/prepare_orbits.py, сравнивая кадры орбит.
-  // Поэтому при смене орбиты turn не меняется, и дом остаётся под тем же углом. Число кадров у орбит может
-  // различаться — всё считается через долю оборота.
+  // Model. Camera position is a single value, turn (fraction of a revolution, 0…1, wrapping), plus the orbit index.
+  // turn is a shared "world" angle for all orbits. The orbit frame for it is:
+  //     k = offset + dir · round(turn · count)   (mod count)
+  // Each orbit has its own offset and dir (reverse), found by tools/prepare_orbits.py by comparing orbit frames.
+  // So switching orbits leaves turn unchanged and the building stays at the same angle. Orbits may have
+  // different frame counts: everything is computed as a fraction of a revolution.
   // ------------------------------------------------------------------------------------------------------------------
   const qs = new URLSearchParams(location.search);
   const base = qs.get('src') || window.ORBITS_BASE || 'frames/';
@@ -99,16 +99,16 @@
 
   let M;
   try { M = await (await fetch(base + 'orbits.json', { cache: 'no-cache' })).json(); }
-  catch (e) { msg('Не нашёл ' + base + 'orbits.json — сначала подготовьте кадры (tools/prepare_orbits.py).'); return; }
+  catch (e) { msg('Could not load ' + base + 'orbits.json. Prepare the frames first (tools/prepare_orbits.py).'); return; }
 
   if (M.note) { $('note').textContent = M.note; $('note').hidden = false; }
   const CFG = Object.assign({
-    degPerPx: 0.3,      // градусов облёта на CSS-пиксель свайпа
-    dragSign: 1,        // 1: тянем вправо — кадры по возрастанию; -1 — наоборот
-    switchPx: 70,       // сколько CSS-пикселей по вертикали на одну ступень высоты
-    hysteresis: 0.2,    // доля switchPx, чтобы на пороге не дребезжало
-    followMs: 60,       // картинка догоняет палец за ~это время (сглаживает рывки событий)
-    parallel: 6,        // одновременных загрузок
+    degPerPx: 0.3,      // orbit degrees per CSS pixel of drag
+    dragSign: 1,        // 1: drag right = ascending frames; -1 = the opposite
+    switchPx: 70,       // vertical CSS pixels per height step
+    hysteresis: 0.2,    // fraction of switchPx, prevents flicker at the threshold
+    followMs: 60,       // image catches up with the finger in ~this time (smooths event jitter)
+    parallel: 6,        // concurrent downloads
   }, M.controls || {});
   const orbits = M.orbits.map(o => Object.assign({ pad: 4, ext: 'webp', offset: 0, reverse: false, zoom: 1, shiftY: 0 }, o));
   orbits.forEach(o => { o.imgs = new Array(o.count).fill(null); o.ok = new Uint8Array(o.count); o.dir = base + o.dir; });
@@ -121,8 +121,8 @@
   let turn = qs.has('deg') ? +qs.get('deg') / 360 : (M.start?.turn || 0);
   let target = turn;
 
-  // --- Загрузка: сначала текущая орбита вокруг текущего угла, сразу же соседние орбиты на этом угле ---------------
-  // (чтобы смена высоты была мгновенной), дальше — всё остальное по удалённости от угла.
+  // --- Loading: current orbit around the current angle first, plus neighbouring orbits at that angle -------------
+  // (so height switches are instant), then everything else by distance from the angle.
   let inflight = 0, loaded = 0;
   const total = orbits.reduce((s, o) => s + o.count, 0);
   function nextToLoad() {
@@ -130,9 +130,9 @@
     for (let li = 0; li < N; li++) {
       const o = orbits[li], c = frameOf(o, turn), lw = Math.abs(li - level);
       for (let k = 0; k < o.count; k++) {
-        if (o.imgs[k] || (o.pack && !o.blobs[k])) continue;   // упакованный кадр ещё не пришёл
-        const d = Math.min(mod(k - c, o.count), mod(c - k, o.count)) / o.count;  // доля оборота до кадра
-        const score = d * 360 + lw * (d * 360 < 6 ? 2 : 25);   // соседние орбиты около угла — почти наравне
+        if (o.imgs[k] || (o.pack && !o.blobs[k])) continue;   // packed frame has not arrived yet
+        const d = Math.min(mod(k - c, o.count), mod(c - k, o.count)) / o.count;  // fraction of a revolution to the frame
+        const score = d * 360 + lw * (d * 360 < 6 ? 2 : 25);   // neighbouring orbits near the angle rank almost equally
         if (score < bestScore) { bestScore = score; best = [o, k]; }
       }
     }
@@ -153,10 +153,10 @@
       img.src = url(o, k);
     }
   }
-  // Упаковка (необязательно): кадры орбиты лежат в нескольких файлах o.pack = [имя, …],
-  // o.index[k] = [номер файла, смещение, длина]. Кадры разложены через один (k % число файлов), поэтому уже после
-  // первого файла каждой орбиты есть весь круг с крупным шагом, дальше он уплотняется.
-  // Меньше запросов — удобно для хостинга с лимитом на число файлов.
+  // Packing (optional): an orbit's frames live in several files o.pack = [name, …],
+  // o.index[k] = [file number, offset, length]. Frames are interleaved (k % file count), so after the first file
+  // of each orbit the full circle is already there at a coarse step, and it fills in from there.
+  // Fewer requests, handy for hosting with a limit on file count.
   orbits.forEach(o => { if (o.pack) { if (!Array.isArray(o.pack)) { o.pack = [o.pack]; o.index = o.index.map(e => [0, ...e]); }
                                       o.blobs = new Array(o.count).fill(null); } });
   async function loadPacks() {
@@ -180,7 +180,7 @@
     if (loaded === total) $('load').classList.add('done');
   }
 
-  // --- Рисование ------------------------------------------------------------------------------------------------
+  // --- Drawing -------------------------------------------------------------------------------------------------------
   let dirty = true, lastDrawn = null;
   function resize() {
     const r = canvas.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio || 1);
@@ -189,7 +189,7 @@
   }
   addEventListener('resize', resize); resize();
 
-  function pickFrame(o, k) {   // нужный кадр, а пока не загружен — ближайший загруженный этой же орбиты
+  function pickFrame(o, k) {   // the wanted frame, or the nearest loaded frame of the same orbit until it loads
     if (o.ok[k] === 1) return k;
     for (let s = 1; s < o.count / 2; s++) {
       if (o.ok[mod(k + s, o.count)] === 1) return mod(k + s, o.count);
@@ -213,13 +213,13 @@
     if (!dbg.hidden) drawDebug();
   }
 
-  // --- Управление -----------------------------------------------------------------------------------------------
+  // --- Controls ------------------------------------------------------------------------------------------------------
   const levelsEl = $('levels');
   orbits.forEach((o, i) => {
     const b = document.createElement('button');
     b.type = 'button'; b.id = 'lvl-' + o.id;
-    b.innerHTML = '<span>' + (o.label || o.id) + '</span><i></i>';
-    b.setAttribute('aria-label', 'Орбита ' + (o.label || o.id));
+    b.innerHTML = '<i></i>';
+    b.setAttribute('aria-label', 'Orbit ' + (o.label || o.id));
     b.onclick = () => setLevel(i);
     levelsEl.append(b);
   });
@@ -233,8 +233,8 @@
   let hinted = false;
   const unhint = () => { if (!hinted) { hinted = true; $('hint').classList.add('gone'); } };
 
-  // Свайп: X крутит облёт, Y от точки касания — ступени высоты (резкое переключение, с гистерезисом).
-  // Оба направления работают одновременно: можно вести палец по диагонали.
+  // Drag: X rotates the orbit, Y from the touch point steps the height (hard switch, with hysteresis).
+  // Both axes work at once, so a diagonal drag does both.
   let drag = null;
   canvas.addEventListener('pointerdown', e => {
     canvas.setPointerCapture(e.pointerId);
@@ -245,19 +245,19 @@
     if (!drag || e.pointerId !== drag.id) return;
     target += CFG.dragSign * (e.clientX - drag.x) * CFG.degPerPx / 360;
     drag.x = e.clientX;
-    const n = (e.clientY - drag.y0) / CFG.switchPx;          // вниз — плюс (к орбите 3), вверх — минус (к 1)
+    const n = (e.clientY - drag.y0) / CFG.switchPx;          // down = plus (lower orbit), up = minus (higher orbit)
     const h = 0.5 + CFG.hysteresis;
     while (n >= drag.step + h) drag.step++;
     while (n <= drag.step - h) drag.step--;
     const want = Math.max(0, Math.min(N - 1, drag.startLevel + drag.step));
-    drag.step = want - drag.startLevel;                       // упёрлись в край — обратный ход срабатывает сразу
+    drag.step = want - drag.startLevel;                       // clamped at the edge, so reversing reacts immediately
     setLevel(want);
   });
   const up = e => { if (drag && e.pointerId === drag.id) { drag = null; canvas.classList.remove('drag'); } };
   canvas.addEventListener('pointerup', up);
   canvas.addEventListener('pointercancel', up);
 
-  // Колесо/тачпад: горизонталь крутит, вертикаль — ступени высоты.
+  // Wheel/trackpad: horizontal rotates, vertical steps the height.
   let wheelY = 0, wheelT = 0;
   canvas.addEventListener('wheel', e => {
     e.preventDefault(); unhint();
@@ -275,34 +275,35 @@
       unhint();
     } else if (e.key === 'ArrowUp') setLevel(level - 1);
     else if (e.key === 'ArrowDown') setLevel(level + 1);
-    else if (e.key === 'd' || e.key === 'D' || e.key === 'в' || e.key === 'В') { dbg.hidden = !dbg.hidden; dirty = true; }
-    else if (!dbg.hidden && (e.key === '[' || e.key === ']' || e.key === 'х' || e.key === 'ъ')) {
-      // Подстройка совмещения руками: сдвиг текущей орбиты на кадр. Итог — в orbits.json → offset.
+    // e.code is the physical key, so these work in any keyboard layout.
+    else if (e.code === 'KeyD') { dbg.hidden = !dbg.hidden; dirty = true; }
+    else if (!dbg.hidden && (e.code === 'BracketLeft' || e.code === 'BracketRight')) {
+      // Manual alignment: shift the current orbit by one frame. Copy the result to orbits.json → offset.
       const o = orbits[level];
-      o.offset = mod(o.offset + (e.key === ']' || e.key === 'ъ' ? 1 : -1), o.count);
+      o.offset = mod(o.offset + (e.code === 'BracketRight' ? 1 : -1), o.count);
       dirty = true; pump();
     }
   });
 
-  // --- Отладка --------------------------------------------------------------------------------------------------
+  // --- Debug ---------------------------------------------------------------------------------------------------------
   const dbg = $('dbg');
   dbg.hidden = !qs.has('debug');
   dbg.innerHTML = '<div id="dbgText"></div><div class="strip">' +
     orbits.map((o, i) => '<div id="dbgCell' + i + '"><canvas width="240" height="180"></canvas><span></span></div>').join('') +
-    '</div><pre>[ ] — сдвиг текущей орбиты на кадр · ←→ кадр · ↑↓ орбита · D — скрыть</pre>';
+    '</div><pre>[ ] shift current orbit by a frame · ←→ frame · ↑↓ orbit · D hide</pre>';
   function drawDebug() {
     const deg = mod(turn, 1) * 360;
-    $('dbgText').textContent = 'угол ' + deg.toFixed(1) + '° · орбита ' + (orbits[level].label || orbits[level].id);
+    $('dbgText').textContent = 'angle ' + deg.toFixed(1) + '° · orbit ' + (orbits[level].label || orbits[level].id);
     orbits.forEach((o, i) => {
       const cell = $('dbgCell' + i), c = cell.querySelector('canvas'), k = frameOf(o, turn), got = pickFrame(o, k);
       cell.classList.toggle('on', i === level);
       if (got >= 0) drawFrame(c, c.getContext('2d'), o, got);
-      cell.querySelector('span').textContent = (o.label || o.id) + ': кадр ' + k + (got !== k ? ' (грузится)' : '') +
-        ' · offset ' + o.offset + (o.reverse ? ' · обр.' : '');
+      cell.querySelector('span').textContent = (o.label || o.id) + ': frame ' + k + (got !== k ? ' (loading)' : '') +
+        ' · offset ' + o.offset + (o.reverse ? ' · rev.' : '');
     });
   }
 
-  // --- Цикл -----------------------------------------------------------------------------------------------------
+  // --- Loop ----------------------------------------------------------------------------------------------------------
   let last = performance.now(), lastBucket = null;
   (function tick(now) {
     const dt = Math.min(100, now - last); last = now;

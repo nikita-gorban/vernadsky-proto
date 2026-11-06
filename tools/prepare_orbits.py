@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
 """
-Подготовка кадров трёх орбит для прототипа (index.html рядом с orbits.json).
+Prepares frames of the three orbits for the prototype (index.html next to orbits.json).
 
-Что делает:
-  1. Берёт кадры каждой орбиты из своей папки (только верхний уровень, по номеру в конце имени файла).
-  2. Ужимает их в webp для веба (--size по длинной стороне, --crop W:H — обрезка по центру).
-  3. Совмещает орбиты по углу: для каждой орбиты ищет, какой её кадр соответствует кадру 0 опорной орбиты
-     (offset) и не крутится ли она в обратную сторону (reverse). Пишет это в orbits.json.
-  4. Кладёт рядом calibration.jpg — листы «одни и те же углы на всех орбитах», чтобы проверить глазами.
+What it does:
+  1. Takes each orbit's frames from its own folder (top level only, ordered by the number at the end of the name).
+  2. Compresses them to webp for the web (--size on the long side, --crop W:H for a centered crop).
+  3. Aligns orbits by angle: for each orbit, finds which of its frames matches frame 0 of the reference orbit
+     (offset) and whether it spins the other way (reverse). Writes this to orbits.json.
+  4. Writes calibration.jpg next to it: the same angles on every orbit, for a visual check.
 
-Как ищется совпадение. Наклон камеры меняет картинку по вертикали, но порядок того, что стоит слева направо
-(углы дома, башни, деревья), от наклона почти не зависит. Поэтому у каждого кадра берётся «профиль по
-столбцам» — сколько вертикальных границ в каждом столбце уменьшенного кадра. Затем сравниваются целые
-последовательности: для каждого сдвига s и направления считается средняя похожесть всех 360 пар кадров
-«опорная[i] ↔ орбита[s ± i]». Голосуют все кадры сразу, поэтому один неудачный ракурс ничего не ломает.
-Число кадров у орбит может различаться (например 360 и 180) — сравнение идёт по доле оборота.
+How matching works. Camera tilt changes the image vertically, but the left-to-right order of things
+(building corners, towers, trees) barely depends on tilt. So each frame gets a "column profile": how many
+vertical edges each column of a downscaled frame has. Then whole sequences are compared: for every shift s and
+direction, the mean similarity of all 360 pairs "reference[i] <-> orbit[s ± i]" is computed. All frames vote at
+once, so one bad view breaks nothing. Orbits may have different frame counts (e.g. 360 and 180): comparison is
+done by fraction of a revolution.
 
-Пример (папки из Dropbox WebApp):
+Example (folders from Dropbox WebApp):
   python3 prepare_orbits.py --out ../frames \
       --orbit 1="…/CC_Aerial_Selecter_panorama360_001" \
       --orbit 2="…/CC_Aerial_Selecter_panorama360_002" \
       --orbit 3="…/CC_Aerial_Selecter_panorama360_003_02" \
       --reference 2 --size 1600
 
-  Если в папке лежат и другие файлы (маски, проходы), сузьте выбор: --orbit 1="папка::CC_Pano360_001_*.jpg"
-  Совмещение можно перебить руками: --offset 3=12 --reverse 3
+  If the folder holds other files too (masks, passes), narrow the selection: --orbit 1="folder::CC_Pano360_001_*.jpg"
+  Alignment can be overridden by hand: --offset 3=12 --reverse 3
 
-Нужны: python3, Pillow, numpy (pip install pillow numpy).
+Requires: python3, Pillow, numpy (pip install pillow numpy).
 """
 import argparse, fnmatch, json, os, re, sys
 from concurrent.futures import ThreadPoolExecutor
@@ -49,20 +49,20 @@ def list_frames(spec):
              and (not pattern or fnmatch.fnmatch(f, pattern))]
     files = [f for f in files if frame_number(f) is not None]
     if not files:
-        sys.exit(f'В {folder} нет кадров{" по маске " + pattern if pattern else ""}')
-    # Если в папке несколько серий (разные префиксы) — берём самую большую: это обычно бьюти.
+        sys.exit(f'No frames in {folder}{" matching " + pattern if pattern else ""}')
+    # If the folder holds several series (different prefixes), take the largest: usually the beauty pass.
     series = {}
     for f in files:
         series.setdefault(re.sub(r'\d+(?=\.[^.]+$)', '#', f), []).append(f)
     key = max(series, key=lambda k: len(series[k]))
     if len(series) > 1:
-        print(f'  {folder}: несколько серий, беру «{key}» ({len(series[key])} шт.); '
-              f'другие: {", ".join(k for k in series if k != key)}')
+        print(f'  {folder}: several series, using "{key}" ({len(series[key])} files); '
+              f'others: {", ".join(k for k in series if k != key)}')
     files = sorted(series[key], key=frame_number)
     nums = [frame_number(f) for f in files]
     gaps = sorted(set(range(nums[0], nums[-1] + 1)) - set(nums))
     if gaps:
-        print(f'  ВНИМАНИЕ: пропущены номера {gaps[:20]}{" …" if len(gaps) > 20 else ""}')
+        print(f'  WARNING: missing frame numbers {gaps[:20]}{" …" if len(gaps) > 20 else ""}')
     return folder, files
 
 
@@ -77,9 +77,9 @@ def crop_box(w, h, aspect):
 
 
 def descriptor(img):
-    """Профиль по столбцам: энергия вертикальных границ, 96 столбцов, нормирован (среднее 0, длина 1)."""
+    """Column profile: vertical edge energy, 96 columns, normalized (zero mean, unit length)."""
     g = np.asarray(img.convert('L').resize((96, 72), Image.BILINEAR), dtype=np.float32)
-    gx = np.abs(np.diff(g, axis=1, append=g[:, -1:]))      # горизонтальный градиент = вертикальные границы
+    gx = np.abs(np.diff(g, axis=1, append=g[:, -1:]))      # horizontal gradient = vertical edges
     prof = gx.mean(axis=0) + 0.5 * np.abs(np.diff(g.mean(axis=0), append=g.mean(axis=0)[-1]))
     prof = np.convolve(prof, np.ones(3) / 3, mode='same')
     prof -= prof.mean()
@@ -105,24 +105,24 @@ def process_orbit(oid, spec, out_dir, size, aspect, quality, jobs):
 
     with ThreadPoolExecutor(jobs) as ex:
         res = list(ex.map(one, range(len(files))))
-    print(f'  орбита {oid}: {len(files)} кадров ({files[0]} … {files[-1]}) → {dst}')
+    print(f'  orbit {oid}: {len(files)} frames ({files[0]} … {files[-1]}) → {dst}')
     return {'files': files, 'desc': np.stack([r[0] for r in res]), 'size': res[0][1]}
 
 
 def best_alignment(ref, other):
-    """Сдвиг (в кадрах другой орбиты) и направление, при которых последовательности совпадают лучше всего."""
+    """Shift (in frames of the other orbit) and direction at which the sequences match best."""
     A, B = ref['desc'], other['desc']
     nA, nB = len(A), len(B)
-    S = A @ B.T                                          # похожесть каждого кадра A с каждым кадром B
-    j = np.round(np.arange(nA) * nB / nA).astype(int)    # кадр B на той же доле оборота (без сдвига)
+    S = A @ B.T                                          # similarity of every frame of A with every frame of B
+    j = np.round(np.arange(nA) * nB / nA).astype(int)    # frame of B at the same fraction of a revolution (no shift)
     scores = {}
     for d in (1, -1):
-        idx = (d * j[None, :] + np.arange(nB)[:, None]) % nB   # [сдвиг, i]
+        idx = (d * j[None, :] + np.arange(nB)[:, None]) % nB   # [shift, i]
         scores[d] = S[np.arange(nA)[None, :], idx].mean(axis=1)
     d = 1 if scores[1].max() >= scores[-1].max() else -1
     s = int(scores[d].argmax())
     sc = scores[d].copy()
-    # уверенность: насколько лучший сдвиг выше лучшего «далёкого» (не соседнего) сдвига
+    # confidence: how far the best shift beats the best "far" (non-adjacent) shift
     far = [k for k in range(nB) if min((k - s) % nB, (s - k) % nB) > max(2, nB // 36)]
     margin = float(sc[s] - sc[far].max()) if far else 0.0
     return s, d == -1, float(sc[s]), margin
@@ -147,21 +147,21 @@ def contact_sheet(out_dir, orbits, manifest, ref_id, path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--orbit', action='append', required=True, metavar='ID=ПАПКА[::маска]',
-                    help='орбита: номер и папка с кадрами; порядок номеров = сверху вниз (1 — верхний свайп)')
-    ap.add_argument('--out', required=True, help='куда положить orbitN/0000.webp … и orbits.json')
-    ap.add_argument('--reference', help='орбита, с которой совмещаются остальные (по умолчанию — средняя)')
-    ap.add_argument('--start', help='с какой орбиты прототип открывается (по умолчанию — опорная)')
-    ap.add_argument('--start-frame', type=int, default=0, help='кадр опорной орбиты, с которого открывается')
-    ap.add_argument('--size', type=int, default=1600, help='длинная сторона кадра, px (0 — не уменьшать)')
-    ap.add_argument('--crop', help='обрезать по центру до пропорции, например 4:3')
+    ap.add_argument('--orbit', action='append', required=True, metavar='ID=FOLDER[::mask]',
+                    help='orbit: id and frame folder; argument order = top to bottom (first = highest swipe)')
+    ap.add_argument('--out', required=True, help='where to write orbitN/0000.webp … and orbits.json')
+    ap.add_argument('--reference', help='orbit the others are aligned to (default: the middle one)')
+    ap.add_argument('--start', help='orbit the prototype opens on (default: the reference)')
+    ap.add_argument('--start-frame', type=int, default=0, help='reference orbit frame the prototype opens on')
+    ap.add_argument('--size', type=int, default=1600, help='long side of a frame, px (0 = no downscale)')
+    ap.add_argument('--crop', help='center crop to an aspect ratio, e.g. 4:3')
     ap.add_argument('--quality', type=int, default=82)
-    ap.add_argument('--offset', action='append', default=[], metavar='ID=N', help='задать сдвиг руками')
-    ap.add_argument('--reverse', action='append', default=[], metavar='ID', help='орбита крутится в обратную сторону')
-    ap.add_argument('--no-align', action='store_true', help='не искать сдвиг (все offset = 0)')
+    ap.add_argument('--offset', action='append', default=[], metavar='ID=N', help='set the shift by hand')
+    ap.add_argument('--reverse', action='append', default=[], metavar='ID', help='orbit spins the other way')
+    ap.add_argument('--no-align', action='store_true', help='skip alignment (all offsets = 0)')
     ap.add_argument('--pack', action='store_true',
-                    help='дополнительно сложить кадры каждой орбиты в файлы orbitN/pack_*.bin (меньше запросов)')
-    ap.add_argument('--pack-mb', type=float, default=15, help='предельный размер одного файла упаковки, МБ')
+                    help='also pack each orbit\'s frames into orbitN/pack_*.bin files (fewer requests)')
+    ap.add_argument('--pack-mb', type=float, default=15, help='max size of one pack file, MB')
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
     a = ap.parse_args()
 
@@ -176,34 +176,34 @@ def main():
     manual_rev = set(a.reverse)
     os.makedirs(a.out, exist_ok=True)
 
-    print('Кадры:')
+    print('Frames:')
     orbits = {oid: process_orbit(oid, specs[oid], a.out, a.size, aspect, a.quality, a.jobs) for oid in ids}
 
-    print(f'Совмещение (опорная орбита {ref_id}):')
+    print(f'Alignment (reference orbit {ref_id}):')
     manifest = {'version': 1, 'reference': ref_id, 'start': {'orbit': a.start or ref_id, 'frame': a.start_frame},
                 'orbits': []}
     for oid in ids:
         o = orbits[oid]
         if oid == ref_id or a.no_align:
-            off, rev, note = 0, False, 'опорная' if oid == ref_id else 'без совмещения'
+            off, rev, note = 0, False, 'reference' if oid == ref_id else 'no alignment'
         else:
             off, rev, score, margin = best_alignment(orbits[ref_id], o)
-            note = f'похожесть {score:.3f}, отрыв от других сдвигов {margin:.3f}'
+            note = f'similarity {score:.3f}, margin over other shifts {margin:.3f}'
             if margin < 0.02:
-                note += '  ← НЕУВЕРЕННО, проверьте calibration.jpg и задайте --offset руками'
+                note += '  ← UNCERTAIN, check calibration.jpg and set --offset by hand'
         if oid in manual_off:
-            off, note = manual_off[oid] % len(o['files']), 'задано руками'
+            off, note = manual_off[oid] % len(o['files']), 'set by hand'
         if oid in manual_rev:
             rev = True
-        print(f'  орбита {oid}: offset {off} (исходный файл {o["files"][off]}), '
-              f'{"обратное направление, " if rev else ""}{note}')
+        print(f'  orbit {oid}: offset {off} (source file {o["files"][off]}), '
+              f'{"reversed, " if rev else ""}{note}')
         manifest['orbits'].append({
             'id': oid, 'dir': f'orbit{oid}/', 'count': len(o['files']), 'pad': 4, 'ext': 'webp',
             'offset': off, 'reverse': rev, 'width': o['size'][0], 'height': o['size'][1],
             'shiftY': 0, 'zoom': 1, 'source': [o['files'][0], o['files'][-1]],
         })
     if a.pack:
-        # Кадры через один по файлам (k % P): после первого файла уже есть весь круг с крупным шагом.
+        # Frames interleaved across files (k % P): after the first file the full circle is there at a coarse step.
         for m in manifest['orbits']:
             d = os.path.join(a.out, m['dir'])
             blobs = [open(os.path.join(d, f'{k:04d}.webp'), 'rb').read() for k in range(m['count'])]
@@ -215,14 +215,14 @@ def main():
                 outs[p].write(data); index[k] = [p, offs[p], len(data)]; offs[p] += len(data)
             for f in outs: f.close()
             m['pack'], m['index'] = [f'pack_{p}.bin' for p in range(P)], index
-            print(f'  орбита {m["id"]}: {P} файл(ов) упаковки')
-    # кадр старта в опорной орбите -> доля оборота
+            print(f'  orbit {m["id"]}: {P} pack file(s)')
+    # start frame in the reference orbit -> fraction of a revolution
     ref = next(m for m in manifest['orbits'] if m['id'] == ref_id)
     manifest['start']['turn'] = a.start_frame / ref['count']
     with open(os.path.join(a.out, 'orbits.json'), 'w', encoding='utf-8') as f:
         json.dump(manifest, f, ensure_ascii=False, indent=1)
     contact_sheet(a.out, orbits, manifest, ref_id, os.path.join(a.out, 'calibration.jpg'))
-    print(f'Готово: {os.path.join(a.out, "orbits.json")}, проверка глазами — {os.path.join(a.out, "calibration.jpg")}')
+    print(f'Done: {os.path.join(a.out, "orbits.json")}, visual check: {os.path.join(a.out, "calibration.jpg")}')
 
 
 if __name__ == '__main__':

@@ -1,31 +1,33 @@
-# Вернадский — три орбиты (прототип)
+# Vernadsky — three orbits (prototype)
 
-В репозитории две версии кадров:
+Live preview: https://nikita-gorban.github.io/vernadsky-proto/ (lite version for phones: [`?src=frames_lite/`](https://nikita-gorban.github.io/vernadsky-proto/?src=frames_lite/))
 
-- `frames/` — полное качество, 1280 px, по файлу на кадр (около 320 МБ). Открывается по умолчанию.
-- `frames_lite/` — облегчённая, 800 px, упакована в `pack_*.bin` (около 100 МБ). Для телефона: `index.html?src=frames_lite/`.
+A fly-around of the building at three heights: swipe left-right to rotate, up-down to switch orbit; the angle stays the same.
 
-Совмещение орбит можно проверить по `frames/calibration.jpg`.
+The repository holds two sets of frames:
 
-Порядок орбит сверху вниз (свайп вверх — выше): 3, 1, 2. Старт — орбита 1. Задаётся порядком в `frames/orbits.json`.
+- `frames/` — full quality, 1280 px, one file per frame (about 290 MB). Loaded by default.
+- `frames_lite/` — lightweight, 800 px, packed into `pack_*.bin` (about 100 MB). For phones: `index.html?src=frames_lite/`.
 
-Исходники кадров: 001 — `CC_Pano360_001_####.jpg`, 002 — `CC_Panorama360_002####.jpg`,
-003 — `CC_Aerial_Selecter_panorama360_003_02/CC_Panorama360_003_####.jpg`. Все три начинаются с одного угла (offset 0).
+Orbit alignment can be checked in `frames/calibration.jpg`.
 
-Облёт здания в трёх высотах: свайп влево-вправо крутит, вверх-вниз переключает орбиту, угол при этом не меняется.
+Orbit order top to bottom (swipe up = higher): 3, 1, 2. Starts on orbit 1. Set by the order in `frames/orbits.json`.
 
-## Как это устроено
+Frame sources: 001 — `CC_Pano360_001_####.jpg`, 002 — `CC_Panorama360_002####.jpg`,
+003 — `CC_Aerial_Selecter_panorama360_003_02/CC_Panorama360_003_####.jpg`. All three start at the same angle (offset 0).
 
-Положение камеры — одна величина: доля оборота `turn` (0…1). Она общая для всех трёх орбит.
-Кадр орбиты для неё: `k = offset + (reverse ? −1 : 1) · round(turn · count)` по модулю `count`.
-При смене орбиты `turn` не меняется, поэтому дом остаётся под тем же углом.
+## How it works
 
-`offset` и `reverse` у каждой орбиты свои и лежат в `frames/orbits.json`. Их находит `tools/prepare_orbits.py`,
-сравнивая последовательности кадров: у каждого кадра берётся профиль по столбцам (где стоят вертикальные границы:
-углы дома, башни). От наклона камеры он почти не зависит. Для каждого сдвига считается похожесть всех кадров сразу,
-и выбирается лучший сдвиг. Если число кадров у орбит разное (360 и 180), сравнение идёт по доле оборота.
+Camera position is a single value: the fraction of a revolution `turn` (0…1). It is shared by all three orbits.
+The orbit frame for it: `k = offset + (reverse ? −1 : 1) · round(turn · count)` mod `count`.
+Switching orbits leaves `turn` unchanged, so the building stays at the same angle.
 
-## Подготовка кадров
+Each orbit has its own `offset` and `reverse`, stored in `frames/orbits.json`. They are found by `tools/prepare_orbits.py`,
+which compares the frame sequences: each frame gets a column profile (where the vertical edges are: building
+corners, towers). It barely depends on camera tilt. For every shift, the similarity of all frames at once is computed,
+and the best shift wins. If orbits have different frame counts (360 and 180), comparison is done by fraction of a revolution.
+
+## Preparing frames
 
 ```
 pip install pillow numpy
@@ -36,27 +38,31 @@ python3 tools/prepare_orbits.py --out frames \
   --reference 2 --size 1600
 ```
 
-Для веба (меньше файлов): `--size 800 --quality 68 --pack`.
+For the web (fewer files): `--size 800 --quality 68 --pack`.
 
-Скрипт выведет найденные offset и уверенность, а рядом положит `frames/calibration.jpg`: одни и те же углы
-(0°, 45°, …) на всех орбитах. Если строка выглядит сдвинутой, задайте сдвиг руками: `--offset 3=12`, `--reverse 3`.
+The script prints the offsets it found and its confidence, and writes `frames/calibration.jpg` next to them: the same angles
+(0°, 45°, …) on every orbit. If a row looks shifted, set the shift by hand: `--offset 3=12`, `--reverse 3`.
 
-Если в папке несколько серий (маски, RenderElements), скрипт берёт самую многочисленную и пишет, какие пропустил;
-маска после `::` выбирает нужную явно.
+If a folder holds several series (masks, RenderElements), the script takes the largest one and reports which it skipped;
+a mask after `::` picks one explicitly.
 
-## Запуск
+## Running locally
 
-Нужен любой локальный сервер (из файла `file://` браузер не загрузит кадры):
+Any local server works (browsers will not load frames from `file://`):
 
 ```
-python3 -m http.server 8000      # потом открыть http://localhost:8000
+python3 -m http.server 8000      # then open http://localhost:8000
 ```
 
-Параметры адреса: `?debug` — панель с тремя орбитами на текущем угле, `?orbit=1`, `?deg=90`, `?src=путь/`.
+URL parameters: `?debug` — panel with all three orbits at the current angle, `?orbit=1`, `?deg=90`, `?src=path/`.
 
-В отладке (`D`): `[` и `]` сдвигают текущую орбиту на кадр, номер кадра виден сразу. Найденное значение
-переносится в `orbits.json` → `offset`. Там же `shiftY` и `zoom`, если дом на разных орбитах стоит на разной высоте
-в кадре.
+In debug mode (`D`): `[` and `]` shift the current orbit by one frame; the frame number updates immediately. Copy the value
+to `orbits.json` → `offset`. The same file has `shiftY` and `zoom`, for when the building sits at different heights
+in the frame on different orbits.
 
-Настройки управления (`orbits.json` → `controls`): `degPerPx` (градусов на пиксель), `dragSign` (направление),
-`switchPx` (пикселей по вертикали на ступень), `hysteresis`.
+Control settings (`orbits.json` → `controls`): `degPerPx` (degrees per pixel), `dragSign` (direction),
+`switchPx` (vertical pixels per step), `hysteresis`.
+
+## Deployment
+
+GitHub Pages serves the `main` branch root (`.nojekyll` disables Jekyll processing). Every push to `main` redeploys.
