@@ -98,4 +98,9 @@ Browser support: AVIF needs Chrome 85+, Firefox 93+, Safari 16.4+.
 
 ## Deployment
 
-GitHub Pages serves the `main` branch root (`.nojekyll` disables Jekyll processing). Every push to `main` redeploys.
+GitHub Pages deploys through `.github/workflows/pages.yml` on every push to `main` (or by hand from the Actions tab).
+The workflow copies the repo into `_site` without `.git`/`.github`, logs the site size, and uploads it; `EXCLUDE` in the
+workflow can leave paths out. The site is about 480 MB, within the 1 GB Pages limit.
+
+If a deploy fails with "Deployment failed, try again later", re-run it: on 2026-11-06 the default branch deploy failed
+four times in a row at 480 MB, while the same 480 MB deployed through this workflow at the first attempt.
