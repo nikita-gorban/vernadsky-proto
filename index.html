@@ -172,7 +172,9 @@
 
   const CFG = Object.assign({
     degPerPx: 0.3,      // orbit degrees per CSS pixel of drag
-    dragSign: 1,        // 1: drag right = ascending frames; -1 = the opposite
+    // -1: drag right = descending frames. Ascending frames move the foreground left, so this way the near side of
+    // the model follows the finger ("grab and turn"); the wheel and arrow keys follow the same sign.
+    dragSign: -1,
     switchPx: 70,       // vertical CSS pixels per height step
     hysteresis: 0.2,    // fraction of switchPx, prevents flicker at the threshold
     followMs: 60,       // image catches up with the finger in ~this time (smooths event jitter)
