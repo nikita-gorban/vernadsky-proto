@@ -1,0 +1,62 @@
+{
+ "version": 1,
+ "reference": "2",
+ "start": {
+  "orbit": "1",
+  "frame": 0,
+  "turn": 0.0
+ },
+ "orbits": [
+  {
+   "id": "3",
+   "dir": "orbit3/",
+   "count": 360,
+   "pad": 4,
+   "ext": "webp",
+   "offset": 0,
+   "reverse": false,
+   "width": 1280,
+   "height": 1280,
+   "shiftY": 0,
+   "zoom": 1,
+   "source": [
+    "CC_Panorama360_003_0001.jpg",
+    "CC_Panorama360_003_0360.jpg"
+   ]
+  },
+  {
+   "id": "1",
+   "dir": "orbit1/",
+   "count": 360,
+   "pad": 4,
+   "ext": "webp",
+   "offset": 0,
+   "reverse": false,
+   "width": 1280,
+   "height": 1280,
+   "shiftY": 0,
+   "zoom": 1,
+   "source": [
+    "CC_Pano360_001_0001.jpg",
+    "CC_Pano360_001_0360.jpg"
+   ]
+  },
+  {
+   "id": "2",
+   "dir": "orbit2/",
+   "count": 360,
+   "pad": 4,
+   "ext": "webp",
+   "offset": 0,
+   "reverse": false,
+   "width": 1280,
+   "height": 1280,
+   "shiftY": 0,
+   "zoom": 1,
+   "source": [
+    "CC_Panorama360_0020001.jpg",
+    "CC_Panorama360_0020360.jpg"
+   ]
+  }
+ ]
+}
