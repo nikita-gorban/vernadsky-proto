@@ -1,0 +1,49 @@
+# Deploys the site to GitHub Pages from main.
+# Unlike the default branch deploy, this one controls what goes into the artifact: EXCLUDE lists paths left out.
+# Currently a control run: frames/orbit2/sharp (52 MB) is left out to test whether deploys fail on site size
+# (460 MB deployed fine, 480 MB failed four times). Clear EXCLUDE to deploy everything again.
+name: Deploy to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+env:
+  EXCLUDE: "frames/orbit2/sharp"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble site
+        run: |
+          args=(--exclude .git --exclude .github)
+          for p in $EXCLUDE; do args+=(--exclude "/$p"); done
+          mkdir _site
+          rsync -a "${args[@]}" --exclude _site ./ _site/
+          echo "Site size: $(du -sh _site | cut -f1), files: $(find _site -type f | wc -l)"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
