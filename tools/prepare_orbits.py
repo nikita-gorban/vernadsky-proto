@@ -27,7 +27,8 @@ Example (folders from Dropbox WebApp; argument order = orbit order top to bottom
 
   If the folder holds other files too (masks, passes), narrow the selection with a mask after "::".
   Alignment can be overridden by hand: --offset 3=12 --reverse 3
-  Re-running keeps "controls", "note", and per-orbit "shiftY"/"zoom" from an existing orbits.json.
+  Re-running keeps "controls", "note", "sun" (see prepare_sun.py), and per-orbit "shiftY"/"zoom" from an existing
+  orbits.json.
 
 Requires: python3, Pillow 11.3+ (built-in AVIF), numpy (pip install pillow numpy).
 """
@@ -213,7 +214,7 @@ def main():
     manifest = {'version': 2, 'reference': ref_id, 'start': {'orbit': a.start or ref_id, 'frame': a.start_frame},
                 'tiers': {name: {'dir': f'{name}/', 'ext': a.format} for name in tiers},
                 'orbits': []}
-    for key in ('controls', 'note'):
+    for key in ('controls', 'note', 'sun'):   # "sun" comes from prepare_sun.py
         if key in old:
             manifest[key] = old[key]
     for oid in ids:

@@ -17,6 +17,21 @@ Each frame comes in two tiers (AVIF), in `frames/orbitN/`:
 Settings were picked on test frames: AVIF is 20–30% smaller than WebP at the same SSIM; at q55 the sharp tier
 smears the tower windows, at q65 it is close to the source.
 
+## Sun mode (time of day)
+
+The sun button under the height switcher turns the view to orbit 1, 0° — the camera of the sun study
+(`WebApp/CC_Sun`, 101 frames from morning to night, 1280 px) — and shows a time slider at the bottom. The study exists
+for this one view only, so turning the view or changing the height leaves the mode. In the mode, ← → step the time.
+
+Frames are in `frames/sun/{spin,sharp}/` (spin 4.5 MB in all), loaded after the orbits, or first once the mode is on.
+The slider opens at the frame whose light is closest to the orbit renders (63), so entering the mode does not jump.
+Prepared with:
+
+```
+python3 tools/prepare_sun.py --out frames --orbit 1 --frame 0 \
+  --src "…/WebApp/CC_Sun::CC_Sun_[0-9]*.jpg"
+```
+
 Orbit alignment can be checked in `frames/calibration.jpg`.
 
 Orbit order top to bottom (swipe up = higher): 3, 1, 2. Starts on orbit 1. Set by the order in `frames/orbits.json`.
